@@ -15,19 +15,23 @@ import (
 )
 
 var (
-	configFile    = flag.String("config.file", "mtr.yml", "MTR exporter configuration file.")
+	configFile    = flag.String("config.file", "mtr.yaml", "MTR exporter configuration file.")
 	listenAddress = flag.String("web.listen-address", ":9116", "The address to listen on for HTTP requests.")
 	showVersion   = flag.Bool("version", false, "Print version information.")
 )
 
 type Config struct {
-	Protocol     string          `yaml:"protocol"` // Defaults to "tcp"
-	reportCycles int             `yaml:"cycles"`   // Defaults to 30
-	Hosts        map[string]Host `yaml:"hosts"`
+	Protocol     string              `yaml:"protocol"` // Defaults to "tcp"
+	ReportCycles int                 `yaml:"cycles"`   // Defaults to 30
+	Hosts        map[string]Hostname `yaml:"hosts"`
+}
+
+type Hostname struct {
+	Hostname map[string]Host `yaml:"hostname"`
 }
 
 type Host struct {
-	Host  string `yaml:"host"`
+	Name  string `yaml:"name"`
 	Alias string `yaml:"alias"`
 }
 
