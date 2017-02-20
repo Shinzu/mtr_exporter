@@ -20,6 +20,10 @@ var (
 	showVersion   = flag.Bool("version", false, "Print version information.")
 )
 
+type mtrCollector struct {
+	metrics []prometheus.Collector
+}
+
 type Config struct {
 	Protocol     string `yaml:"protocol"` // Defaults to "tcp"
 	ReportCycles int    `yaml:"cycles"`   // Defaults to 30
@@ -33,6 +37,35 @@ type Host struct {
 
 func init() {
 	prometheus.MustRegister(version.NewCollector("mtr_exporter"))
+}
+
+func NewMtrCollector() (*mtrCollector, error) {
+	var (
+		Namespace = "mtr"
+		alias     = "alias"
+		hop       = "hop"
+	)
+
+	return &mtrCollector{
+		metrics: []prometheus.Collector{
+			prometheus.NewGaugeVec(
+				prometheus.GaugeOpts{
+					Namespace: Namespace,
+					Name:      "sent",
+					Help:      "packets sent",
+				},
+				[]string{alias, hop},
+			),
+			prometheus.NewGaugeVec(
+				prometheus.GaugeOpts{
+					Namespace: Namespace,
+					Name:      "received",
+					Help:      "packets received",
+				},
+				[]string{alias, hop},
+			),
+		},
+	}, nil
 }
 
 func main() {
