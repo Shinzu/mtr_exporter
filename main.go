@@ -35,6 +35,8 @@ type Host struct {
 	Alias string `yaml:"alias"`
 }
 
+var config Config
+
 func init() {
 	prometheus.MustRegister(version.NewCollector("mtr_exporter"))
 }
@@ -66,6 +68,7 @@ func NewMtrCollector() (*mtrCollector, error) {
 			),
 		},
 	}, nil
+
 }
 
 func main() {
@@ -85,14 +88,10 @@ func main() {
 		log.Fatalf("Error reading config file: %s", err)
 	}
 
-	config := Config{}
-
 	err = yaml.Unmarshal(yamlFile, &config)
 	if err != nil {
 		log.Fatalf("Error parsing config file: %s", err)
 	}
-
-	fmt.Println(config)
 
 	http.Handle("/metrics", prometheus.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
