@@ -21,18 +21,18 @@ var (
 )
 
 type Config struct {
-	Protocol     string              `yaml:"protocol"` // Defaults to "tcp"
-	ReportCycles int                 `yaml:"cycles"`   // Defaults to 30
-	Hosts        map[string]Hostname `yaml:"hosts"`
-}
-
-type Hostname struct {
-	Hostname map[string]Host `yaml:"hostname"`
+	Protocol     string `yaml:"protocol"` // Defaults to "tcp"
+	ReportCycles int    `yaml:"cycles"`   // Defaults to 30
+	Hosts        []Host `yaml:"hosts"`
 }
 
 type Host struct {
 	Name  string `yaml:"name"`
 	Alias string `yaml:"alias"`
+}
+
+func init() {
+	prometheus.MustRegister(version.NewCollector("mtr_exporter"))
 }
 
 func main() {
@@ -58,6 +58,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error parsing config file: %s", err)
 	}
+
+	fmt.Println(config)
 
 	http.Handle("/metrics", prometheus.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

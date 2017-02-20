@@ -1,9 +1,7 @@
 protocol: tcp
 cycles: 30
 hosts:
-  hostname:
-    name: "www.zalando.de"
+  - name: "www.zalando.de"
     alias: "zalando_de"
-  hostname:
-    name: "www.heise.de"
+  - name: "www.heise.de"
     alias: "heise_de"
