@@ -15,6 +15,12 @@
 			"revisionTime": "2015-02-23T13:51:52Z"
 		},
 		{
+			"checksumSHA1": "A0vIHHbbz63EvbRZeBK+Kwd9a2k=",
+			"path": "github.com/fastly/go-mtr",
+			"revision": "f38deed4611e5b0f16e2d7defe86a53fa4c5dba5",
+			"revisionTime": "2014-03-28T22:46:22Z"
+		},
+		{
 			"checksumSHA1": "p+kMSQKvtjS2WOuE96yhF2qeMpY=",
 			"path": "github.com/golang/protobuf/proto",
 			"revision": "2402d76f3d41f928c7902a765dfc872356dd3aad",
