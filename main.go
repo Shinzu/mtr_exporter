@@ -6,27 +6,25 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"strconv"
 
 	"gopkg.in/yaml.v2"
 
+	mtr "github.com/fastly/go-mtr"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
 	"github.com/prometheus/common/version"
 )
 
-var (
-	configFile    = flag.String("config.file", "mtr.yaml", "MTR exporter configuration file.")
-	listenAddress = flag.String("web.listen-address", ":9116", "The address to listen on for HTTP requests.")
-	showVersion   = flag.Bool("version", false, "Print version information.")
-)
-
-type mtrCollector struct {
-	metrics []prometheus.Collector
+type Exporter struct {
+	//mutex    sync.Mutex
+	sent     *prometheus.GaugeVec
+	received *prometheus.GaugeVec
 }
 
 type Config struct {
-	Protocol     string `yaml:"protocol"` // Defaults to "tcp"
-	ReportCycles int    `yaml:"cycles"`   // Defaults to 30
+	Arguments    string `yaml:"args"`
+	ReportCycles int    `yaml:"cycles"`
 	Hosts        []Host `yaml:"hosts"`
 }
 
@@ -35,43 +33,117 @@ type Host struct {
 	Alias string `yaml:"alias"`
 }
 
-var config Config
-
-func init() {
-	prometheus.MustRegister(version.NewCollector("mtr_exporter"))
+type targetFeedback struct {
+	Target string
+	Hosts  []*mtr.Host
 }
 
-func NewMtrCollector() (*mtrCollector, error) {
+var config Config
+
+const (
+	Namespace = "mtr"
+)
+
+func NewExporter() *Exporter {
 	var (
-		Namespace = "mtr"
-		alias     = "alias"
-		hop       = "hop"
+		hop_id = "hop_id"
+		hop_ip = "hop_ip"
+		server = "server"
 	)
 
-	return &mtrCollector{
-		metrics: []prometheus.Collector{
-			prometheus.NewGaugeVec(
-				prometheus.GaugeOpts{
-					Namespace: Namespace,
-					Name:      "sent",
-					Help:      "packets sent",
-				},
-				[]string{alias, hop},
-			),
-			prometheus.NewGaugeVec(
-				prometheus.GaugeOpts{
-					Namespace: Namespace,
-					Name:      "received",
-					Help:      "packets received",
-				},
-				[]string{alias, hop},
-			),
-		},
-	}, nil
+	return &Exporter{
+		sent: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: Namespace,
+				Name:      "sent",
+				Help:      "packets sent",
+			},
+			[]string{server, hop_id, hop_ip},
+		),
+		received: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: Namespace,
+				Name:      "received",
+				Help:      "packets received",
+			},
+			[]string{server, hop_id, hop_ip},
+		),
+	}
+}
 
+func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
+	e.sent.Describe(ch)
+	e.received.Describe(ch)
+}
+
+func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
+	jobs := make(chan string, 1024)
+	results := make(chan *targetFeedback)
+
+	for w := 1; w <= len(config.Hosts); w++ {
+		go worker(w, jobs, results)
+	}
+
+	for _, host := range config.Hosts {
+		jobs <- host.Name
+	}
+	//close(jobs)
+
+	for tf := range results {
+		fmt.Println(tf)
+		for _, host := range tf.Hosts {
+			fmt.Println(host.Sent)
+			fmt.Println(host.Received)
+			e.sent.WithLabelValues(tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Sent))
+			e.received.WithLabelValues(tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Received))
+		}
+	}
+
+	e.sent.Collect(ch)
+	e.received.Collect(ch)
+	return nil
+}
+
+func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
+	//e.mutex.Lock()
+	//defer e.mutex.Unlock()
+	if err := e.collect(ch); err != nil {
+		log.Errorf("Error scraping mtr: %s", err)
+	}
+	return
+}
+
+func trace(cycles int, host string, args string, results chan<- *targetFeedback) {
+	// run MTR and wait for it to complete
+	arg := fmt.Sprintf("--%v", args)
+	a := mtr.New(cycles, host, arg)
+	<-a.Done
+
+	// output result
+	if a.Error != nil {
+		log.Errorln("%v", a.Error)
+	} else {
+		results <- &targetFeedback{
+			Target: host,
+			Hosts:  a.Hosts,
+		}
+	}
+}
+
+func worker(id int, jobs <-chan string, results chan<- *targetFeedback) {
+	for job := range jobs {
+		log.Infoln("worker", id, "processing job", job)
+		trace(config.ReportCycles, job, config.Arguments, results)
+	}
 }
 
 func main() {
+	var (
+		configFile    = flag.String("config.file", "mtr.yaml", "MTR exporter configuration file.")
+		listenAddress = flag.String("web.listen-address", ":9116", "The address to listen on for HTTP requests.")
+		showVersion   = flag.Bool("version", false, "Print version information.")
+	)
+
 	flag.Parse()
 
 	if *showVersion {
@@ -92,6 +164,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error parsing config file: %s", err)
 	}
+
+	prometheus.MustRegister(version.NewCollector("mtr_exporter"))
+	exporter := NewExporter()
+	prometheus.MustRegister(exporter)
+
+	fmt.Println(config)
 
 	http.Handle("/metrics", prometheus.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

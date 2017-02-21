@@ -1,7 +1,7 @@
-protocol: tcp
-cycles: 30
+args: tcp
+cycles: 10
 hosts:
   - name: "www.zalando.de"
     alias: "zalando_de"
-  - name: "www.heise.de"
-    alias: "heise_de"
+  - name: "www.spiegel.de"
+    alias: "spiegel_de"
