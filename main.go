@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 
 	"gopkg.in/yaml.v2"
 
@@ -17,7 +18,7 @@ import (
 )
 
 type Exporter struct {
-	//mutex    sync.Mutex
+	mutex    sync.Mutex
 	sent     *prometheus.GaugeVec
 	received *prometheus.GaugeVec
 }
@@ -79,6 +80,7 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
 	jobs := make(chan string, 1024)
 	results := make(chan *targetFeedback)
+	defer close(results)
 
 	for w := 1; w <= len(config.Hosts); w++ {
 		go worker(w, jobs, results)
@@ -87,13 +89,11 @@ func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
 	for _, host := range config.Hosts {
 		jobs <- host.Name
 	}
-	//close(jobs)
+	close(jobs)
 
 	for tf := range results {
 		fmt.Println(tf)
 		for _, host := range tf.Hosts {
-			fmt.Println(host.Sent)
-			fmt.Println(host.Received)
 			e.sent.WithLabelValues(tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Sent))
 			e.received.WithLabelValues(tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Received))
 		}
@@ -105,16 +105,18 @@ func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
 }
 
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
-	//e.mutex.Lock()
-	//defer e.mutex.Unlock()
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
 	if err := e.collect(ch); err != nil {
 		log.Errorf("Error scraping mtr: %s", err)
 	}
 	return
 }
 
-func trace(cycles int, host string, args string, results chan<- *targetFeedback) {
+func trace(host string, results chan<- *targetFeedback) {
 	// run MTR and wait for it to complete
+	cycles := config.ReportCycles
+	args := config.Arguments
 	arg := fmt.Sprintf("--%v", args)
 	a := mtr.New(cycles, host, arg)
 	<-a.Done
@@ -133,7 +135,7 @@ func trace(cycles int, host string, args string, results chan<- *targetFeedback)
 func worker(id int, jobs <-chan string, results chan<- *targetFeedback) {
 	for job := range jobs {
 		log.Infoln("worker", id, "processing job", job)
-		trace(config.ReportCycles, job, config.Arguments, results)
+		trace(job, results)
 	}
 }
 
