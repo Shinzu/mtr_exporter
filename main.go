@@ -80,11 +80,17 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
 	jobs := make(chan string, 1024)
 	results := make(chan *targetFeedback)
-	defer close(results)
+	wg := &sync.WaitGroup{}
+	wg.Add(len(config.Hosts))
 
 	for w := 1; w <= len(config.Hosts); w++ {
-		go worker(w, jobs, results)
+		go worker(w, jobs, results, wg)
 	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
 
 	for _, host := range config.Hosts {
 		jobs <- host.Name
@@ -132,7 +138,8 @@ func trace(host string, results chan<- *targetFeedback) {
 	}
 }
 
-func worker(id int, jobs <-chan string, results chan<- *targetFeedback) {
+func worker(id int, jobs <-chan string, results chan<- *targetFeedback, wg *sync.WaitGroup) {
+	defer wg.Done()
 	for job := range jobs {
 		log.Infoln("worker", id, "processing job", job)
 		trace(job, results)
