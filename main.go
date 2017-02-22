@@ -184,7 +184,7 @@ func trace(host Host, results chan<- *TargetFeedback) {
 	// run MTR and wait for it to complete
 	cycles := config.ReportCycles
 	args := config.Arguments
-	arg := fmt.Sprintf("--%v", args)
+	arg := fmt.Sprintf("%v", args)
 	a := mtr.New(cycles, host.Name, arg)
 	<-a.Done
 

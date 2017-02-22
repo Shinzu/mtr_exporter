@@ -1,4 +1,4 @@
-args: tcp
+args: "--tcp"
 cycles: 10
 hosts:
   - name: "www.zalando.de"
