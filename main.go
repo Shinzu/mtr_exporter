@@ -238,8 +238,6 @@ func main() {
 	exporter := NewExporter()
 	prometheus.MustRegister(exporter)
 
-	fmt.Println(config)
-
 	http.Handle("/metrics", prometheus.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<html>
