@@ -21,6 +21,12 @@ type Exporter struct {
 	mutex    sync.Mutex
 	sent     *prometheus.GaugeVec
 	received *prometheus.GaugeVec
+	dropped  *prometheus.GaugeVec
+	lost     *prometheus.GaugeVec
+	mean     *prometheus.GaugeVec
+	best     *prometheus.GaugeVec
+	worst    *prometheus.GaugeVec
+	standard *prometheus.GaugeVec
 }
 
 type Config struct {
@@ -48,9 +54,10 @@ const (
 
 func NewExporter() *Exporter {
 	var (
+		alias  = "alias"
+		server = "server"
 		hop_id = "hop_id"
 		hop_ip = "hop_ip"
-		server = "server"
 	)
 
 	return &Exporter{
@@ -60,7 +67,7 @@ func NewExporter() *Exporter {
 				Name:      "sent",
 				Help:      "packets sent",
 			},
-			[]string{server, hop_id, hop_ip},
+			[]string{alias, server, hop_id, hop_ip},
 		),
 		received: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -68,7 +75,55 @@ func NewExporter() *Exporter {
 				Name:      "received",
 				Help:      "packets received",
 			},
-			[]string{server, hop_id, hop_ip},
+			[]string{alias, server, hop_id, hop_ip},
+		),
+		dropped: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: Namespace,
+				Name:      "dropped",
+				Help:      "packets dropped",
+			},
+			[]string{alias, server, hop_id, hop_ip},
+		),
+		lost: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: Namespace,
+				Name:      "lost",
+				Help:      "packets lost in percent",
+			},
+			[]string{alias, server, hop_id, hop_ip},
+		),
+		mean: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: Namespace,
+				Name:      "mean",
+				Help:      "mean time of all packets in microseconds",
+			},
+			[]string{alias, server, hop_id, hop_ip},
+		),
+		best: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: Namespace,
+				Name:      "best",
+				Help:      "best time for a packet in microseconds",
+			},
+			[]string{alias, server, hop_id, hop_ip},
+		),
+		worst: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: Namespace,
+				Name:      "worst",
+				Help:      "worst time for a packet in microseconds",
+			},
+			[]string{alias, server, hop_id, hop_ip},
+		),
+		standard: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: Namespace,
+				Name:      "standard",
+				Help:      "standard deviation of the latencies to each hop",
+			},
+			[]string{alias, server, hop_id, hop_ip},
 		),
 	}
 }
@@ -94,13 +149,25 @@ func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
 
 	for tf := range results {
 		for _, host := range tf.Hosts {
-			e.sent.WithLabelValues(tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Sent))
-			e.received.WithLabelValues(tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Received))
+			e.sent.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Sent))
+			e.received.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Received))
+			e.dropped.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Dropped))
+			e.lost.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(host.LostPercent * 100)
+			e.mean.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(host.Mean)
+			e.best.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Best))
+			e.worst.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Worst))
+			e.standard.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(host.StandardDev)
 		}
 	}
 
 	e.sent.Collect(ch)
 	e.received.Collect(ch)
+	e.dropped.Collect(ch)
+	e.lost.Collect(ch)
+	e.mean.Collect(ch)
+	e.best.Collect(ch)
+	e.worst.Collect(ch)
+	e.standard.Collect(ch)
 	return nil
 }
 
