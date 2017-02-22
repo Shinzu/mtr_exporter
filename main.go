@@ -34,8 +34,9 @@ type Host struct {
 	Alias string `yaml:"alias"`
 }
 
-type targetFeedback struct {
+type TargetFeedback struct {
 	Target string
+	Alias  string
 	Hosts  []*mtr.Host
 }
 
@@ -78,13 +79,12 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
-	jobs := make(chan string, 1024)
-	results := make(chan *targetFeedback)
+	results := make(chan *TargetFeedback)
 	wg := &sync.WaitGroup{}
 	wg.Add(len(config.Hosts))
 
-	for w := 1; w <= len(config.Hosts); w++ {
-		go worker(w, jobs, results, wg)
+	for w, host := range config.Hosts {
+		go worker(w, host, results, wg)
 	}
 
 	go func() {
@@ -92,13 +92,7 @@ func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
 		close(results)
 	}()
 
-	for _, host := range config.Hosts {
-		jobs <- host.Name
-	}
-	close(jobs)
-
 	for tf := range results {
-		fmt.Println(tf)
 		for _, host := range tf.Hosts {
 			e.sent.WithLabelValues(tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Sent))
 			e.received.WithLabelValues(tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Received))
@@ -119,31 +113,30 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	return
 }
 
-func trace(host string, results chan<- *targetFeedback) {
+func trace(host Host, results chan<- *TargetFeedback) {
 	// run MTR and wait for it to complete
 	cycles := config.ReportCycles
 	args := config.Arguments
 	arg := fmt.Sprintf("--%v", args)
-	a := mtr.New(cycles, host, arg)
+	a := mtr.New(cycles, host.Name, arg)
 	<-a.Done
 
 	// output result
 	if a.Error != nil {
 		log.Errorln("%v", a.Error)
 	} else {
-		results <- &targetFeedback{
-			Target: host,
+		results <- &TargetFeedback{
+			Target: host.Name,
+			Alias:  host.Alias,
 			Hosts:  a.Hosts,
 		}
 	}
 }
 
-func worker(id int, jobs <-chan string, results chan<- *targetFeedback, wg *sync.WaitGroup) {
+func worker(id int, host Host, results chan<- *TargetFeedback, wg *sync.WaitGroup) {
 	defer wg.Done()
-	for job := range jobs {
-		log.Infoln("worker", id, "processing job", job)
-		trace(job, results)
-	}
+	log.Infoln("worker", id, "processing job", host.Name, "aliased as", host.Alias)
+	trace(host, results)
 }
 
 func main() {
