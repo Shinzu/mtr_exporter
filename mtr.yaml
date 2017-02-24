@@ -1,4 +1,4 @@
-args: "--tcp"
+args: ["--tcp", "--port", "443"]
 cycles: 10
 hosts:
   - name: "www.heise.de"

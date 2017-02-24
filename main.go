@@ -30,9 +30,9 @@ type Exporter struct {
 }
 
 type Config struct {
-	Arguments    string `yaml:"args"`
-	ReportCycles int    `yaml:"cycles"`
-	Hosts        []Host `yaml:"hosts"`
+	Arguments    []string `yaml:"args"`
+	ReportCycles int      `yaml:"cycles"`
+	Hosts        []Host   `yaml:"hosts"`
 }
 
 type Host struct {
@@ -183,9 +183,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 func trace(host Host, results chan<- *TargetFeedback) {
 	// run MTR and wait for it to complete
 	cycles := config.ReportCycles
-	args := config.Arguments
-	arg := fmt.Sprintf("%v", args)
-	a := mtr.New(cycles, host.Name, arg)
+	a := mtr.New(cycles, host.Name, config.Arguments...)
 	<-a.Done
 
 	// output result
@@ -204,6 +202,7 @@ func worker(id int, host Host, results chan<- *TargetFeedback, wg *sync.WaitGrou
 	defer wg.Done()
 	log.Infoln("worker", id, "processing job", host.Name, "aliased as", host.Alias)
 	trace(host, results)
+	log.Infoln("worker", id, "finished job", host.Name, "aliased as", host.Alias)
 }
 
 func main() {
