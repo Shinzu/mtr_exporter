@@ -182,8 +182,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 
 func trace(host Host, results chan<- *TargetFeedback) {
 	// run MTR and wait for it to complete
-	cycles := config.ReportCycles
-	a := mtr.New(cycles, host.Name, config.Arguments...)
+	a := mtr.New(config.ReportCycles, host.Name, config.Arguments...)
 	<-a.Done
 
 	// output result
