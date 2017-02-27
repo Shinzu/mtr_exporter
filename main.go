@@ -131,6 +131,23 @@ func NewExporter() *Exporter {
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	e.sent.Describe(ch)
 	e.received.Describe(ch)
+	e.dropped.Describe(ch)
+	e.lost.Describe(ch)
+	e.mean.Describe(ch)
+	e.best.Describe(ch)
+	e.worst.Describe(ch)
+	e.standard.Describe(ch)
+}
+
+func (e *Exporter) Reset() {
+	e.sent.Reset()
+	e.received.Reset()
+	e.dropped.Reset()
+	e.lost.Reset()
+	e.mean.Reset()
+	e.best.Reset()
+	e.worst.Reset()
+	e.standard.Reset()
 }
 
 func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
@@ -177,6 +194,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	if err := e.collect(ch); err != nil {
 		log.Errorf("Error scraping mtr: %s", err)
 	}
+	e.Reset()
 	return
 }
 
