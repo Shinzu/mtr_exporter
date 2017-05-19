@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v2"
 
-	mtr "github.com/fastly/go-mtr"
+	mtr "github.com/Shinzu/go-mtr"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
 	"github.com/prometheus/common/version"
