@@ -9,6 +9,7 @@ import (
 	"net"
 	"os/exec"
 	"strconv"
+	"strings"
 )
 
 type Host struct {
@@ -99,7 +100,13 @@ func (m *MTR) processOutput() {
 		case 'd':
 			m.Hosts[hostnum].Name = string(line[finalFieldIdx:])
 		case 'p':
-			m.Hosts[hostnum].PacketMicrosecs = append(m.Hosts[hostnum].PacketMicrosecs, parseByteNum(line[finalFieldIdx:]))
+			s := strings.Fields(string(line))[2]
+			n, err := strconv.Atoi(s)
+			if err != nil {
+				fmt.Printf("ERR: Can not convert %s to int\n", s)
+			} else {
+				m.Hosts[hostnum].PacketMicrosecs = append(m.Hosts[hostnum].PacketMicrosecs, n)
+			}
 		}
 	}
 
