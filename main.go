@@ -86,7 +86,7 @@ func NewExporter() *Exporter {
 			prometheus.CounterOpts{
 				Namespace: Namespace,
 				Name:      "lost",
-				Help:      "packets lost in percent",
+				Help:      "packets lost",
 			},
 			[]string{alias, server, hop_id, hop_ip},
 		),
@@ -155,7 +155,7 @@ func (e *Exporter) collect() error {
 				e.sent.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(float64(host.Sent))
 				e.received.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(float64(host.Received))
 				e.dropped.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(float64(host.Dropped))
-				e.lost.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(host.LostPercent * 100)
+				e.lost.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(host.LostPercent * float64(host.Sent))
 				e.latency.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Observe(host.Mean)
 			}
 		}
