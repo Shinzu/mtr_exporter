@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"time"
 
 	"gopkg.in/yaml.v2"
 
@@ -160,7 +159,6 @@ func (e *Exporter) collect() error {
 				e.latency.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Observe(host.Mean)
 			}
 		}
-		time.Sleep(1)
 	}
 }
 
