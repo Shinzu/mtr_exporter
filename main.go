@@ -23,13 +23,13 @@ type Exporter struct {
 	received *prometheus.CounterVec
 	dropped  *prometheus.CounterVec
 	lost     *prometheus.CounterVec
-	latency     *prometheus.SummaryVec
-	failed     *prometheus.CounterVec
+	latency  *prometheus.SummaryVec
+	failed   *prometheus.CounterVec
 }
 
 type Config struct {
-	Arguments    []string `yaml:"args"`
-	Hosts        []Host   `yaml:"hosts"`
+	Arguments []string `yaml:"args"`
+	Hosts     []Host   `yaml:"hosts"`
 }
 
 type Host struct {
@@ -92,17 +92,17 @@ func NewExporter() *Exporter {
 		),
 		latency: prometheus.NewSummaryVec(
 			prometheus.SummaryOpts{
-				Namespace:  Namespace,
-				Name:       "latency",
-				Help:       "packet latency in microseconds",
+				Namespace: Namespace,
+				Name:      "latency",
+				Help:      "packet latency in microseconds",
 				Objectives: map[float64]float64{
-					0.5: 0.05,
-					0.9: 0.01,
+					0.5:  0.05,
+					0.9:  0.01,
 					0.99: 0.001,
 				},
-				MaxAge: prometheus.DefMaxAge,
+				MaxAge:     prometheus.DefMaxAge,
 				AgeBuckets: prometheus.DefAgeBuckets,
-				BufCap: prometheus.DefBufCap,
+				BufCap:     prometheus.DefBufCap,
 			},
 			[]string{alias, server, hop_id, hop_ip},
 		),
@@ -137,7 +137,7 @@ func (e *Exporter) collect() error {
 				log.Infoln("worker", w, "processing job", host.Name, "aliased as", host.Alias)
 				err := worker(w, host, results, wg)
 				if err != nil {
-				  log.Errorf("worker %d failed job %v aliased as %v: %v\n", w, host.Name, host.Alias, err)
+					log.Errorf("worker %d failed job %v aliased as %v: %v\n", w, host.Name, host.Alias, err)
 					e.failed.WithLabelValues(host.Alias, host.Name).Inc()
 				} else {
 					log.Infoln("worker", w, "finished job", host.Name, "aliased as", host.Alias)
