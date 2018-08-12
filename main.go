@@ -57,10 +57,12 @@ const (
 
 func NewExporter() *Exporter {
 	var (
-		alias  = "alias"
-		server = "server"
-		hop_id = "hop_id"
-		hop_ip = "hop_ip"
+		alias        = "alias"
+		server       = "server"
+		hop_id       = "hop_id"
+		hop_ip       = "hop_ip"
+		previousDest = "previous"
+		currentDest  = "current"
 	)
 
 	return &Exporter{
@@ -118,7 +120,7 @@ func NewExporter() *Exporter {
 				Name:      "route_changes",
 				Help:      "route changes",
 			},
-			[]string{alias, server},
+			[]string{alias, server, hop_id},
 		),
 		destinationChanges: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -126,7 +128,7 @@ func NewExporter() *Exporter {
 				Name:      "destination_changes",
 				Help:      "Number of times the destination IP has changed",
 			},
-			[]string{alias, server},
+			[]string{alias, server, previousDest, currentDest},
 		),
 		failed: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -150,6 +152,13 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	e.routeChanges.Describe(ch)
 	e.destinationChanges.Describe(ch)
 	e.failed.Describe(ch)
+}
+
+func min(a int, b int) int {
+	if a > b {
+		return b
+	}
+	return a
 }
 
 func (e *Exporter) collect() error {
@@ -187,12 +196,14 @@ func (e *Exporter) collect() error {
 				e.lost.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(host.LostPercent * float64(host.Sent))
 				e.latency.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Observe(host.Mean)
 			}
-			if !reflect.DeepEqual(route, e.lastRoute[tf.Alias]) {
-				e.routeChanges.WithLabelValues(tf.Alias, tf.Target).Inc()
-				e.lastRoute[tf.Alias] = route
+			for i := 0; i < min(len(route), len(e.lastRoute[tf.Alias])); i++ {
+				if e.lastRoute[tf.Alias] != nil && !reflect.DeepEqual(route[i], e.lastRoute[tf.Alias][i]) {
+					e.routeChanges.WithLabelValues(tf.Alias, tf.Target, fmt.Sprintf("%d", i)).Inc()
+					e.lastRoute[tf.Alias] = route
+				}
 			}
-			if !reflect.DeepEqual(destination, e.lastDest[tf.Alias]) {
-				e.destinationChanges.WithLabelValues(tf.Alias, tf.Target).Inc()
+			if e.lastDest[tf.Alias] != nil && !reflect.DeepEqual(destination, e.lastDest[tf.Alias]) {
+				e.destinationChanges.WithLabelValues(tf.Alias, tf.Target, e.lastDest[tf.Alias].String(), destination.String()).Inc()
 				e.lastDest[tf.Alias] = destination
 			}
 		}
