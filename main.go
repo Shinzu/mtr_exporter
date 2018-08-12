@@ -4,8 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"strconv"
 	"sync"
 
@@ -18,13 +20,17 @@ import (
 )
 
 type Exporter struct {
-	mutex    sync.Mutex
-	sent     *prometheus.CounterVec
-	received *prometheus.CounterVec
-	dropped  *prometheus.CounterVec
-	lost     *prometheus.CounterVec
-	latency  *prometheus.SummaryVec
-	failed   *prometheus.CounterVec
+	mutex              sync.Mutex
+	sent               *prometheus.CounterVec
+	received           *prometheus.CounterVec
+	dropped            *prometheus.CounterVec
+	lost               *prometheus.CounterVec
+	latency            *prometheus.SummaryVec
+	routeChanges       *prometheus.CounterVec
+	destinationChanges *prometheus.CounterVec
+	failed             *prometheus.CounterVec
+	lastDest           map[string]net.IP
+	lastRoute          map[string][]net.IP
 }
 
 type Config struct {
@@ -106,6 +112,22 @@ func NewExporter() *Exporter {
 			},
 			[]string{alias, server, hop_id, hop_ip},
 		),
+		routeChanges: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: Namespace,
+				Name:      "route_changes",
+				Help:      "route changes",
+			},
+			[]string{alias, server},
+		),
+		destinationChanges: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: Namespace,
+				Name:      "destination_changes",
+				Help:      "Number of times the destination IP has changed",
+			},
+			[]string{alias, server},
+		),
 		failed: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: Namespace,
@@ -114,6 +136,8 @@ func NewExporter() *Exporter {
 			},
 			[]string{alias, server},
 		),
+		lastDest:  make(map[string]net.IP, len(config.Hosts)),
+		lastRoute: make(map[string][]net.IP, len(config.Hosts)),
 	}
 }
 
@@ -123,6 +147,8 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	e.dropped.Describe(ch)
 	e.lost.Describe(ch)
 	e.latency.Describe(ch)
+	e.routeChanges.Describe(ch)
+	e.destinationChanges.Describe(ch)
 	e.failed.Describe(ch)
 }
 
@@ -151,12 +177,23 @@ func (e *Exporter) collect() error {
 		}()
 
 		for tf := range results {
-			for _, host := range tf.Hosts {
+			route := make([]net.IP, len(tf.Hosts))
+			destination := tf.Hosts[len(tf.Hosts)-1].IP
+			for i, host := range tf.Hosts {
+				route[i] = host.IP
 				e.sent.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(float64(host.Sent))
 				e.received.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(float64(host.Received))
 				e.dropped.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(float64(host.Dropped))
 				e.lost.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(host.LostPercent * float64(host.Sent))
 				e.latency.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Observe(host.Mean)
+			}
+			if !reflect.DeepEqual(route, e.lastRoute[tf.Alias]) {
+				e.routeChanges.WithLabelValues(tf.Alias, tf.Target).Inc()
+				e.lastRoute[tf.Alias] = route
+			}
+			if !reflect.DeepEqual(destination, e.lastDest[tf.Alias]) {
+				e.destinationChanges.WithLabelValues(tf.Alias, tf.Target).Inc()
+				e.lastDest[tf.Alias] = destination
 			}
 		}
 	}
@@ -168,6 +205,8 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	e.dropped.Collect(ch)
 	e.lost.Collect(ch)
 	e.latency.Collect(ch)
+	e.routeChanges.Collect(ch)
+	e.destinationChanges.Collect(ch)
 	e.failed.Collect(ch)
 	return
 }
