@@ -196,11 +196,20 @@ func (e *Exporter) collect() error {
 				e.lost.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(host.LostPercent * float64(host.Sent))
 				e.latency.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Observe(host.Mean)
 			}
-			for i := 0; i < min(len(route), len(e.lastRoute[tf.Alias])); i++ {
-				if e.lastRoute[tf.Alias] != nil && !reflect.DeepEqual(route[i], e.lastRoute[tf.Alias][i]) {
-					e.routeChanges.WithLabelValues(tf.Alias, tf.Target, fmt.Sprintf("%d", i)).Inc()
-					e.lastRoute[tf.Alias] = route
+			if e.lastRoute[tf.Alias] != nil {
+				m := min(len(route), len(e.lastRoute[tf.Alias]))
+				if len(route) != len(e.lastRoute[tf.Alias]) {
+					e.routeChanges.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(m)).Inc()
+				} else {
+					// m - 1 because if the routes are the same apart from the destination, it's
+					// just the destination that's changed, and that's recorded separately below
+					for i := 0; i < (m - 1); i++ {
+						if !reflect.DeepEqual(route[i], e.lastRoute[tf.Alias][i]) {
+							e.routeChanges.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(i)).Inc()
+						}
+					}
 				}
+				e.lastRoute[tf.Alias] = route
 			}
 			if e.lastDest[tf.Alias] != nil && !reflect.DeepEqual(destination, e.lastDest[tf.Alias]) {
 				e.destinationChanges.WithLabelValues(tf.Alias, tf.Target, e.lastDest[tf.Alias].String(), destination.String()).Inc()
