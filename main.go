@@ -209,8 +209,8 @@ func (e *Exporter) collect() error {
 						}
 					}
 				}
-				e.lastRoute[tf.Alias] = route
 			}
+			e.lastRoute[tf.Alias] = route
 			if e.lastDest[tf.Alias] != nil && !reflect.DeepEqual(destination, e.lastDest[tf.Alias]) {
 				e.destinationChanges.WithLabelValues(tf.Alias, tf.Target, e.lastDest[tf.Alias].String(), destination.String()).Inc()
 			}
