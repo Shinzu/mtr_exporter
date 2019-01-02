@@ -4,8 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"strconv"
 	"sync"
 
@@ -18,21 +20,22 @@ import (
 )
 
 type Exporter struct {
-	mutex    sync.Mutex
-	sent     *prometheus.GaugeVec
-	received *prometheus.GaugeVec
-	dropped  *prometheus.GaugeVec
-	lost     *prometheus.GaugeVec
-	mean     *prometheus.GaugeVec
-	best     *prometheus.GaugeVec
-	worst    *prometheus.GaugeVec
-	standard *prometheus.GaugeVec
+	mutex              sync.Mutex
+	sent               *prometheus.CounterVec
+	received           *prometheus.CounterVec
+	dropped            *prometheus.CounterVec
+	lost               *prometheus.CounterVec
+	latency            *prometheus.SummaryVec
+	routeChanges       *prometheus.CounterVec
+	destinationChanges *prometheus.CounterVec
+	failed             *prometheus.CounterVec
+	lastDest           map[string]net.IP
+	lastRoute          map[string][]net.IP
 }
 
 type Config struct {
-	Arguments    []string `yaml:"args"`
-	ReportCycles int      `yaml:"cycles"`
-	Hosts        []Host   `yaml:"hosts"`
+	Arguments []string `yaml:"args"`
+	Hosts     []Host   `yaml:"hosts"`
 }
 
 type Host struct {
@@ -54,77 +57,89 @@ const (
 
 func NewExporter() *Exporter {
 	var (
-		alias  = "alias"
-		server = "server"
-		hop_id = "hop_id"
-		hop_ip = "hop_ip"
+		alias        = "alias"
+		server       = "server"
+		hop_id       = "hop_id"
+		hop_ip       = "hop_ip"
+		previousDest = "previous"
+		currentDest  = "current"
 	)
 
 	return &Exporter{
-		sent: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
+		sent: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
 				Namespace: Namespace,
 				Name:      "sent",
 				Help:      "packets sent",
 			},
 			[]string{alias, server, hop_id, hop_ip},
 		),
-		received: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
+		received: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
 				Namespace: Namespace,
 				Name:      "received",
 				Help:      "packets received",
 			},
 			[]string{alias, server, hop_id, hop_ip},
 		),
-		dropped: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
+		dropped: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
 				Namespace: Namespace,
 				Name:      "dropped",
 				Help:      "packets dropped",
 			},
 			[]string{alias, server, hop_id, hop_ip},
 		),
-		lost: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
+		lost: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
 				Namespace: Namespace,
 				Name:      "lost",
-				Help:      "packets lost in percent",
+				Help:      "packets lost",
 			},
 			[]string{alias, server, hop_id, hop_ip},
 		),
-		mean: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
+		latency: prometheus.NewSummaryVec(
+			prometheus.SummaryOpts{
 				Namespace: Namespace,
-				Name:      "mean",
-				Help:      "mean time of all packets in microseconds",
+				Name:      "latency",
+				Help:      "packet latency in microseconds",
+				Objectives: map[float64]float64{
+					0.5:  0.05,
+					0.9:  0.01,
+					0.99: 0.001,
+				},
+				MaxAge:     prometheus.DefMaxAge,
+				AgeBuckets: prometheus.DefAgeBuckets,
+				BufCap:     prometheus.DefBufCap,
 			},
 			[]string{alias, server, hop_id, hop_ip},
 		),
-		best: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
+		routeChanges: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
 				Namespace: Namespace,
-				Name:      "best",
-				Help:      "best time for a packet in microseconds",
+				Name:      "route_changes",
+				Help:      "route changes",
 			},
-			[]string{alias, server, hop_id, hop_ip},
+			[]string{alias, server, hop_id},
 		),
-		worst: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
+		destinationChanges: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
 				Namespace: Namespace,
-				Name:      "worst",
-				Help:      "worst time for a packet in microseconds",
+				Name:      "destination_changes",
+				Help:      "Number of times the destination IP has changed",
 			},
-			[]string{alias, server, hop_id, hop_ip},
+			[]string{alias, server, previousDest, currentDest},
 		),
-		standard: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
+		failed: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
 				Namespace: Namespace,
-				Name:      "standard",
-				Help:      "standard deviation of the latencies to each hop",
+				Name:      "failed",
+				Help:      "MTR runs failed",
 			},
-			[]string{alias, server, hop_id, hop_ip},
+			[]string{alias, server},
 		),
+		lastDest:  make(map[string]net.IP, len(config.Hosts)),
+		lastRoute: make(map[string][]net.IP, len(config.Hosts)),
 	}
 }
 
@@ -133,93 +148,108 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	e.received.Describe(ch)
 	e.dropped.Describe(ch)
 	e.lost.Describe(ch)
-	e.mean.Describe(ch)
-	e.best.Describe(ch)
-	e.worst.Describe(ch)
-	e.standard.Describe(ch)
+	e.latency.Describe(ch)
+	e.routeChanges.Describe(ch)
+	e.destinationChanges.Describe(ch)
+	e.failed.Describe(ch)
 }
 
-func (e *Exporter) Reset() {
-	e.sent.Reset()
-	e.received.Reset()
-	e.dropped.Reset()
-	e.lost.Reset()
-	e.mean.Reset()
-	e.best.Reset()
-	e.worst.Reset()
-	e.standard.Reset()
-}
-
-func (e *Exporter) collect(ch chan<- prometheus.Metric) error {
-	results := make(chan *TargetFeedback)
-	wg := &sync.WaitGroup{}
-	wg.Add(len(config.Hosts))
-
-	for w, host := range config.Hosts {
-		go worker(w, host, results, wg)
+func min(a int, b int) int {
+	if a > b {
+		return b
 	}
+	return a
+}
 
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
+func (e *Exporter) collect() error {
+	for {
+		results := make(chan *TargetFeedback)
+		wg := &sync.WaitGroup{}
+		wg.Add(len(config.Hosts))
 
-	for tf := range results {
-		for _, host := range tf.Hosts {
-			e.sent.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Sent))
-			e.received.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Received))
-			e.dropped.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Dropped))
-			e.lost.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(host.LostPercent * 100)
-			e.mean.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(host.Mean)
-			e.best.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Best))
-			e.worst.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(float64(host.Worst))
-			e.standard.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Set(host.StandardDev)
+		for w, host := range config.Hosts {
+			go func(w int, host Host) {
+				log.Infoln("worker", w, "processing job", host.Name, "aliased as", host.Alias)
+				err := worker(w, host, results, wg)
+				if err != nil {
+					log.Errorf("worker %d failed job %v aliased as %v: %v\n", w, host.Name, host.Alias, err)
+					e.failed.WithLabelValues(host.Alias, host.Name).Inc()
+				} else {
+					log.Infoln("worker", w, "finished job", host.Name, "aliased as", host.Alias)
+				}
+			}(w, host)
+		}
+
+		go func() {
+			wg.Wait()
+			close(results)
+		}()
+
+		for tf := range results {
+			route := make([]net.IP, len(tf.Hosts))
+			destination := tf.Hosts[len(tf.Hosts)-1].IP
+			for i, host := range tf.Hosts {
+				route[i] = host.IP
+				e.sent.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(float64(host.Sent))
+				e.received.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(float64(host.Received))
+				e.dropped.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(float64(host.Dropped))
+				e.lost.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Add(host.LostPercent * float64(host.Sent))
+				e.latency.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(host.Hop), host.IP.String()).Observe(host.Mean)
+			}
+			if e.lastRoute[tf.Alias] != nil {
+				m := min(len(route), len(e.lastRoute[tf.Alias]))
+				if len(route) != len(e.lastRoute[tf.Alias]) {
+					e.routeChanges.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(m)).Inc()
+				} else {
+					// m - 1 because if the routes are the same apart from the destination, it's
+					// just the destination that's changed, and that's recorded separately below
+					for i := 0; i < (m - 1); i++ {
+						if !reflect.DeepEqual(route[i], e.lastRoute[tf.Alias][i]) {
+							e.routeChanges.WithLabelValues(tf.Alias, tf.Target, strconv.Itoa(i)).Inc()
+						}
+					}
+				}
+			}
+			e.lastRoute[tf.Alias] = route
+			if e.lastDest[tf.Alias] != nil && !reflect.DeepEqual(destination, e.lastDest[tf.Alias]) {
+				e.destinationChanges.WithLabelValues(tf.Alias, tf.Target, e.lastDest[tf.Alias].String(), destination.String()).Inc()
+			}
+			e.lastDest[tf.Alias] = destination
 		}
 	}
+}
 
+func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	e.sent.Collect(ch)
 	e.received.Collect(ch)
 	e.dropped.Collect(ch)
 	e.lost.Collect(ch)
-	e.mean.Collect(ch)
-	e.best.Collect(ch)
-	e.worst.Collect(ch)
-	e.standard.Collect(ch)
-	return nil
-}
-
-func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
-	if err := e.collect(ch); err != nil {
-		log.Errorf("Error scraping mtr: %s", err)
-	}
-	e.Reset()
+	e.latency.Collect(ch)
+	e.routeChanges.Collect(ch)
+	e.destinationChanges.Collect(ch)
+	e.failed.Collect(ch)
 	return
 }
 
-func trace(host Host, results chan<- *TargetFeedback) {
+func trace(host Host, results chan<- *TargetFeedback) error {
 	// run MTR and wait for it to complete
-	a := mtr.New(config.ReportCycles, host.Name, config.Arguments...)
+	a := mtr.New(1, host.Name, config.Arguments...)
 	<-a.Done
 
 	// output result
-	if a.Error != nil {
-		log.Errorln("%v", a.Error)
-	} else {
+	if a.Error == nil {
 		results <- &TargetFeedback{
 			Target: host.Name,
 			Alias:  host.Alias,
 			Hosts:  a.Hosts,
 		}
 	}
+	return a.Error
 }
 
-func worker(id int, host Host, results chan<- *TargetFeedback, wg *sync.WaitGroup) {
+func worker(id int, host Host, results chan<- *TargetFeedback, wg *sync.WaitGroup) error {
 	defer wg.Done()
-	log.Infoln("worker", id, "processing job", host.Name, "aliased as", host.Alias)
-	trace(host, results)
-	log.Infoln("worker", id, "finished job", host.Name, "aliased as", host.Alias)
+	return trace(host, results)
 }
 
 func main() {
@@ -253,6 +283,8 @@ func main() {
 	prometheus.MustRegister(version.NewCollector("mtr_exporter"))
 	exporter := NewExporter()
 	prometheus.MustRegister(exporter)
+
+	go exporter.collect()
 
 	http.Handle("/metrics", prometheus.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
