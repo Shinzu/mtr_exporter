@@ -1,6 +1,10 @@
 # mtr_exporter
 simple exporter for [mtr](http://www.bitwizard.nl/mtr/) stats for prometheus.
 
+## Version v0.1.0 vs v0.2.0
+v0.1.0 runs the mtr command synchronously and provides the data as a 'snapshot' in time, thus you will need to configure the scrape timeout accordingly (scrape timeout >= cycles)
+v0.2.0 runs the mtr command asynchron in the background and provide the data in a more prometheus like way, also metrics were removed/added or renamed (see https://github.com/Shinzu/mtr_exporter/pull/1)
+
 ## Getting Started
 
 To run it:
